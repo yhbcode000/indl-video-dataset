@@ -1,5 +1,5 @@
-from generator import *
-from planner import Planner
+from .generator import *
+from .planner import Planner
 
 # Instantiate the Planner class
 planner = Planner()
