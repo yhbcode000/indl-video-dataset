@@ -12,7 +12,7 @@ from PIL import Image
 import pandas as pd
 import pyllusion
 from tqdm import tqdm
-import imageio
+import cv2
 
 def interpolate_states(start_value, end_value, interp_factor):
     """
@@ -21,10 +21,9 @@ def interpolate_states(start_value, end_value, interp_factor):
     return start_value + interp_factor * (end_value - start_value)
 
 
-
 def dataset01_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Hering Wundt illusion with smooth transitions.
+    Generates a video dataset of the Hering Wundt illusion with smooth transitions using OpenCV for video writing.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -37,7 +36,7 @@ def dataset01_video(path, size, positive_ratio, video_frames=10, framerate=10):
     None
     """
     label_df = pd.DataFrame(columns=['name', 'label', 'start_slope', 'end_slope', 'start_step_size', 'end_step_size', 'bend'])
-    
+
     for i in tqdm(range(size)):
         label = int(np.random.rand() < positive_ratio)
         start_slope = np.random.rand() * 5 + 1
@@ -46,12 +45,16 @@ def dataset01_video(path, size, positive_ratio, video_frames=10, framerate=10):
         end_step_size = np.random.rand() * 0.15 + 0.1
         bend = 0
 
+        # Define video writer parameters
         video_path = os.path.join(path, f'hering_video_{i}.mp4')
+        frame_width = 256
+        frame_height = 256
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
+
+        # Prepare figure for plotting
         fig, ax = plt.subplots(figsize=(4, 4), dpi=64)
         plt.axis('off')
-
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
 
         for frame in range(video_frames):
             interp_factor = frame / (video_frames - 1)
@@ -70,27 +73,33 @@ def dataset01_video(path, size, positive_ratio, video_frames=10, framerate=10):
                 while bend == 0:
                     bend = np.random.rand() * 0.08
                 sign = 1 if np.random.rand() > 0.5 else -1
-                ax.plot([-1, -(1-sign * bend), -1], [-4, 0, 4], 'r', linewidth=2)
-                ax.plot([1, (1-sign * bend), 1], [-4, 0, 4], 'r', linewidth=2)
+                ax.plot([-1, -(1 - sign * bend), -1], [-4, 0, 4], 'r', linewidth=2)
+                ax.plot([1, (1 - sign * bend), 1], [-4, 0, 4], 'r', linewidth=2)
 
-            # Convert current frame to image and add to video
+            # Convert matplotlib figure to image
             fig.canvas.draw()
-            frame_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
-            frame_image = frame_image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            video_writer.append_data(frame_image)
+            img = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+            img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
 
-        video_writer.close()
+            # Convert to BGR (as OpenCV uses BGR format) and resize to target resolution
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            img_bgr = cv2.resize(img_bgr, (frame_width, frame_height))
+
+            # Write frame to video
+            video_writer.write(img_bgr)
+
+        video_writer.release()  # Close the video writer
 
         # Save metadata for the video
         label_df.loc[len(label_df)] = [f'hering_video_{i}.mp4', label, start_slope, end_slope, start_step_size, end_step_size, bend]
-    
+
     # Save labels to CSV
     label_df.to_csv(os.path.join(path, "video_label.csv"), index=False)
 
 
 def dataset02_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Muller-Lyer illusion with smooth transitions in rotation.
+    Generates a video dataset of the Muller-Lyer illusion with smooth transitions in rotation using OpenCV.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -103,35 +112,34 @@ def dataset02_video(path, size, positive_ratio, video_frames=10, framerate=10):
     None
     """
     label_df = pd.DataFrame(columns=['name', 'label', 'value', 'start_rotation', 'end_rotation', 'Top_x1', 'Top_y1', 'Top_x2', 'Top_y2', 'Bottom_x1', 'Bottom_y1', 'Bottom_x2', 'Bottom_y2'])
-    
+
     for i in tqdm(range(size)):
         label = int(np.random.rand() < positive_ratio)
         diff = 0 if label else np.random.randint(-500, 500) / 1000.0  # Ensure float division
         strength = -np.random.randint(25, 35)
-        mullerlyer = pyllusion.MullerLyer(illusion_strength=strength, difference=diff, distance=np.random.randint(80, 120) / 100.0)  # Ensure float division
-        start_rotation = float(np.random.randint(0, 180))  # Ensure float
-        end_rotation = float(np.random.randint(0, 180))  # Ensure float
+        mullerlyer = pyllusion.MullerLyer(illusion_strength=strength, difference=diff, distance=np.random.randint(80, 120) / 100.0)
+        start_rotation = float(np.random.randint(0, 180))
+        end_rotation = float(np.random.randint(0, 180))
 
-        # Create video path
+        # Create video path and video writer
         video_path = os.path.join(path, f'mullerlyer_video_{i}.mp4')
-
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
+        frame_width, frame_height = 128, 128
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
 
         for frame in range(video_frames):
-            interp_factor = frame / (video_frames - 1)  # Ensure interp_factor is a float
+            interp_factor = frame / (video_frames - 1)
             current_rotation = interpolate_states(start_rotation, end_rotation, interp_factor)
 
             # Generate the image with the current rotation
             img = mullerlyer.to_image(width=128, height=128, outline=4).rotate(angle=current_rotation, fillcolor=(255, 255, 255, 255))
-            fn = lambda x: 255 if x > 210 else 0
-            img = img.convert("L").point(fn, mode='1')
 
-            # Convert image to numpy array and add to video
-            img_np = np.array(img)
-            video_writer.append_data(img_np)
+            # Convert PIL image to numpy array (binary format) and write to video
+            img_np = np.array(img.convert("L"))
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            video_writer.write(img_bgr)
 
-        video_writer.close()
+        video_writer.release()
 
         # Save metadata for the video
         dict = mullerlyer.get_parameters()
@@ -143,7 +151,7 @@ def dataset02_video(path, size, positive_ratio, video_frames=10, framerate=10):
 
 def dataset03_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Poggendorff illusion with smooth transitions in illusion strength.
+    Generates a video dataset of the Poggendorff illusion with smooth transitions using OpenCV.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -156,18 +164,18 @@ def dataset03_video(path, size, positive_ratio, video_frames=10, framerate=10):
     None
     """
     label_df = pd.DataFrame(columns=['name', 'label', 'start_strength', 'end_strength', 'diff', 'Left_x1', 'Left_y1', 'Left_x2', 'Left_y2', 'Right_x1', 'Right_y1', 'Right_x2', 'Right_y2', 'Angle', 'Rectangle_Height', 'Rectangle_Width'])
-    
+
     for i in tqdm(range(size)):
         label = int(np.random.rand() < positive_ratio)
         diff = 0 if label else 0.3 * np.random.rand()
         start_strength = -np.random.randint(1, 60)
         end_strength = -np.random.randint(1, 60)
-        
-        # Create video path
-        video_path = os.path.join(path, f'poggendorff_video_{i}.mp4')
 
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
+        # Create video path and video writer
+        video_path = os.path.join(path, f'poggendorff_video_{i}.mp4')
+        frame_width, frame_height = 128, 128
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
 
         for frame in range(video_frames):
             interp_factor = frame / (video_frames - 1)
@@ -176,14 +184,13 @@ def dataset03_video(path, size, positive_ratio, video_frames=10, framerate=10):
             # Generate the image with the current illusion strength
             poggendorff = pyllusion.Poggendorff(illusion_strength=current_strength, difference=diff)
             img = poggendorff.to_image(width=128, height=128)
-            fn = lambda x: 255 if x > 210 else 0
-            img = img.convert("L").point(fn, mode='1')
 
-            # Convert image to numpy array and add to video
-            img_np = np.array(img)
-            video_writer.append_data(img_np)
+            # Convert PIL image to numpy array and write to video
+            img_np = np.array(img.convert("L"))
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            video_writer.write(img_bgr)
 
-        video_writer.close()
+        video_writer.release()
 
         # Save metadata for the video
         dict = poggendorff.get_parameters()
@@ -194,7 +201,7 @@ def dataset03_video(path, size, positive_ratio, video_frames=10, framerate=10):
 
 def dataset04_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Vertical-Horizontal illusion with smooth transitions in illusion strength.
+    Generates a video dataset of the Vertical-Horizontal illusion with smooth transitions using OpenCV.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -213,28 +220,27 @@ def dataset04_video(path, size, positive_ratio, video_frames=10, framerate=10):
         diff = 0 if label else 0.3 * np.random.rand()
         start_strength = -np.random.randint(60, 90)
         end_strength = -np.random.randint(60, 90)
-        
-        # Create video path
-        video_path = os.path.join(path, f'vertical_video_{i}.mp4')
 
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
+        # Create video path and video writer
+        video_path = os.path.join(path, f'vertical_video_{i}.mp4')
+        frame_width, frame_height = 128, 128
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
 
         for frame in range(video_frames):
             interp_factor = frame / (video_frames - 1)
             current_strength = interpolate_states(start_strength, end_strength, interp_factor)
 
             # Generate the image with the current illusion strength
-            zollner = pyllusion.VerticalHorizontal(illusion_strength=current_strength, difference=diff)
-            img = zollner.to_image(width=128, height=128)
-            fn = lambda x: 255 if x > 210 else 0
-            img = img.convert("L").point(fn, mode='1')
+            vertical_horizontal = pyllusion.VerticalHorizontal(illusion_strength=current_strength, difference=diff)
+            img = vertical_horizontal.to_image(width=128, height=128)
 
-            # Convert image to numpy array and add to video
-            img_np = np.array(img)
-            video_writer.append_data(img_np)
+            # Convert PIL image to numpy array and write to video
+            img_np = np.array(img.convert("L"))
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            video_writer.write(img_bgr)
 
-        video_writer.close()
+        video_writer.release()
 
         # Save metadata for the video
         label_df.loc[len(label_df)] = [f'vertical_video_{i}.mp4', label, start_strength, end_strength, diff]
@@ -242,10 +248,9 @@ def dataset04_video(path, size, positive_ratio, video_frames=10, framerate=10):
     # Save labels to CSV
     label_df.to_csv(os.path.join(path, "video_label.csv"), index=False)
 
-
 def dataset05_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Zollner illusion with smooth transitions in illusion strength.
+    Generates a video dataset of the Zollner illusion with smooth transitions using OpenCV.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -265,12 +270,12 @@ def dataset05_video(path, size, positive_ratio, video_frames=10, framerate=10):
         start_strength = np.random.randint(45, 65)
         end_strength = np.random.randint(45, 65)
         rotation = np.random.randint(0, 180)
-        
-        # Create video path
-        video_path = os.path.join(path, f'zollner_video_{i}.mp4')
 
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
+        # Create video path and video writer
+        video_path = os.path.join(path, f'zollner_video_{i}.mp4')
+        frame_width, frame_height = 128, 128
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
 
         for frame in range(video_frames):
             interp_factor = frame / (video_frames - 1)
@@ -279,14 +284,13 @@ def dataset05_video(path, size, positive_ratio, video_frames=10, framerate=10):
             # Generate the image with the current illusion strength
             zollner = pyllusion.Zollner(illusion_strength=current_strength, difference=diff)
             img = zollner.to_image(width=128, height=128).rotate(angle=rotation, fillcolor=(255, 255, 255, 255))
-            fn = lambda x: 255 if x > 210 else 0
-            img = img.convert("L").point(fn, mode='1')
 
-            # Convert image to numpy array and add to video
-            img_np = np.array(img)
-            video_writer.append_data(img_np)
+            # Convert PIL image to numpy array and write to video
+            img_np = np.array(img.convert("L"))
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
+            video_writer.write(img_bgr)
 
-        video_writer.close()
+        video_writer.release()
 
         # Save metadata for the video
         label_df.loc[len(label_df)] = [f'zollner_video_{i}.mp4', label, start_strength, end_strength, diff, rotation]
@@ -295,9 +299,11 @@ def dataset05_video(path, size, positive_ratio, video_frames=10, framerate=10):
     label_df.to_csv(os.path.join(path, "video_label.csv"), index=False)
 
 
+import cv2
+
 def dataset06_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Red-Yellow Boundary illusion with smooth transitions in width, x, and y.
+    Generates a video dataset of the Red-Yellow Boundary illusion with smooth transitions in width, x, and y using OpenCV.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -328,11 +334,11 @@ def dataset06_video(path, size, positive_ratio, video_frames=10, framerate=10):
             c = (1, 0.5, 0)
             label = 1
 
-        # Create video path
+        # Create video path and video writer
         video_path = os.path.join(path, f'rect_video_{i}.mp4')
-
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
+        frame_width, frame_height = 256, 256
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
 
         for frame in range(video_frames):
             interp_factor = frame / (video_frames - 1)
@@ -359,11 +365,12 @@ def dataset06_video(path, size, positive_ratio, video_frames=10, framerate=10):
             fig.canvas.draw()
             img_np = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
             img_np = img_np.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            video_writer.append_data(img_np)
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)  # Convert to BGR for OpenCV
+            video_writer.write(cv2.resize(img_bgr, (frame_width, frame_height)))  # Write frame
 
             plt.close(fig)  # Close the figure after each frame to free up memory
 
-        video_writer.close()
+        video_writer.release()
 
         # Save metadata for the video
         label_df.loc[len(label_df)] = [f'rect_video_{i}.mp4', label, start_width, end_width, start_x, end_x, start_y, end_y, *c]
@@ -374,7 +381,7 @@ def dataset06_video(path, size, positive_ratio, video_frames=10, framerate=10):
 
 def dataset07_video(path, size, positive_ratio, video_frames=10, framerate=10):
     """
-    Generates a video dataset of the Clock Angle illusion with smooth transitions for points p1 and p2.
+    Generates a video dataset of the Clock Angle illusion with smooth transitions for points p1 and p2 using OpenCV.
 
     Parameters:
     path (str): Directory to save the generated videos and labels.
@@ -405,12 +412,12 @@ def dataset07_video(path, size, positive_ratio, video_frames=10, framerate=10):
         end_p1 = np.random.rand(2) * 64 - 32
         start_p2 = np.random.rand(2) * 64 - 32
         end_p2 = np.random.rand(2) * 64 - 32
-        
-        # Create video path
-        video_path = os.path.join(path, f'clock_angle_video_{i}.mp4')
 
-        # Prepare video writer with the specified framerate
-        video_writer = imageio.get_writer(video_path, fps=framerate)
+        # Create video path and video writer
+        video_path = os.path.join(path, f'clock_angle_video_{i}.mp4')
+        frame_width, frame_height = 256, 256
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, framerate, (frame_width, frame_height))
 
         for frame in range(video_frames):
             interp_factor = frame / (video_frames - 1)
@@ -449,11 +456,12 @@ def dataset07_video(path, size, positive_ratio, video_frames=10, framerate=10):
             fig.canvas.draw()
             img_np = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
             img_np = img_np.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            video_writer.append_data(img_np)
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+            video_writer.write(cv2.resize(img_bgr, (frame_width, frame_height)))
 
-            plt.close(fig)  # Close the figure after each frame to free up memory
+            plt.close(fig)
 
-        video_writer.close()
+        video_writer.release()
 
         # Calculate the angle between p1-p2 and p2-p3
         angle = get_angle(p2 - p1, p3 - p2)
